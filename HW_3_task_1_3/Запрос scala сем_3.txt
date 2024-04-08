@@ -1,0 +1,83 @@
+/*
+chcp 65001 && spark-shell -i \Users\Ekaterina\ETL\seminar_3\s3_new.scala --conf "spark.driver.extraJavaOptions=-Dfile.encoding=utf-8"
+*/
+import org.apache.spark.internal.Logging
+import org.apache.spark.sql.functions.{col, collect_list, concat_ws}
+import org.apache.spark.sql.{DataFrame, SparkSession}
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.expressions.Window
+val t1 = System.currentTimeMillis()
+val misqlcon = "jdbc:mysql://localhost:3306/spark?user=root&password=24082019:jhf"
+val driver = "com.mysql.cj.jdbc.Driver" 
+
+var df1 = spark.read.format("com.crealytics.spark.excel")
+        .option("sheetName", "Sheet1")
+        .option("useHeader", "false")
+        .option("treatEmptyValuesAsNulls", "false")
+        .option("inferSchema", "true").option("addColorColumns", "true")
+        .option("usePlainNumberFormat","true")
+        .option("startColumn", 0)
+        .option("endColumn", 99)
+        .option("timestampFormat", "MM-dd-yyyy HH:mm:ss")
+        .option("maxRowsInMemory", 20)
+        .option("excerptSize", 10)
+        .option("header", "true")
+        .format("excel")
+        .load("/Users/Ekaterina/ETL/seminar_3/s3.xlsx")
+
+        df1.write.format("jdbc")
+        .option("url", misqlcon)
+	     .option("driver", driver)
+        .option("dbtable", "Sem3_task_0")
+        .option("user", "root")
+        .option("password", "24082019:jhf")
+        .option("charset", "utf8mb4_general_ci")  
+        .mode("overwrite")
+        .save()
+
+/*Запрос если бы работали оконные функции*/
+
+val sem_3 = """SELECT ei, FROM_UNIXTIME(StatusTime) StatusTime,
+IFNULL((lead(StatusTime) OVER (PARTITION BY ei ORDER BY StatusTime) - StatusTime) / 3600, 0) Длительность,
+   case when status is NULL then @prev1
+   ELSE @prev1:=status
+   END status,
+   case when `group` is null then @prev2
+   ELSE @prev2:=`group`
+   END `group`
+FROM  
+
+(SELECT ei, StatusTime, status,
+   IF (ROW_NUMBER() OVER (PARTITION BY ei ORDER BY StatusTime) = 1 AND Назначение IS NULL, '', `group`) `group`
+	FROM 
+(SELECT DISTINCT a.objectid ei, a.restime StatusTime, status, `group`, Назначение,   
+   (SELECT @prev1:=''),
+	(SELECT @prev2:='') FROM
+   (SELECT DISTINCT a.objectId, a.restime FROM spark.sem3_task_0 AS a
+	WHERE fieldname  IN ('status', 'gname2')) a
+
+LEFT JOIN
+   (SELECT DISTINCT objectId, restime, fieldvalue status  FROM spark.sem3_task_0 
+	WHERE fieldname  IN ('status')) a1	
+	ON a.objectid = a1.objectid AND a.restime = a1.restime
+
+LEFT JOIN
+   (SELECT DISTINCT objectId, restime, fieldvalue `group`, 1 Назначение FROM spark.sem3_task_0 
+   WHERE fieldname IN ('gname2')) a2
+   ON a.objectid = a2.objectid AND a.restime = a2.restime) b1)b2
+ORDER BY 1,2
+"""
+
+spark.read.format("jdbc").option("url", misqlcon)
+  .option("driver","com.mysql.cj.jdbc.Driver")
+  .option("query", sem_3).load()
+  .write.format("jdbc").option("url", misqlcon)
+  .option("driver", "com.mysql.cj.jdbc.Driver").option("dbtable", "sem3_01")
+  .mode("overwrite").save()
+
+val s0 = (System.currentTimeMillis() - t1)/1000
+val s = s0 % 60
+val m = (s0/60) % 60
+val h = (s0/60/60) % 24
+println("%02d:%02d:%02d".format(h, m, s))
+System.exit(0)
