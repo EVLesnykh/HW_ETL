@@ -1,0 +1,27 @@
+SELECT 
+    b1.ei,
+    FROM_UNIXTIME(b1.StatusTime) AS StatusTime,
+    b1.status,
+    IF((b1.rn = 1 AND b1.Назначение IS NULL), '', b1.group) AS `group`
+FROM 
+    (SELECT 
+        a.objectid ei, a.restime StatusTime, `status`, a.group, a.Назначение,
+        @prev1 := IF(@prev2 = a.objectid, @prev1 + 1, 1) AS rn,
+        @prev2 := a.objectid
+
+FROM 
+   (SELECT DISTINCT a.objectId, a.restime, `status`, a.group
+   FROM spark.sem3_task_0 AS a
+   WHERE fieldname IN ('status', 'gname2')) a
+    
+LEFT JOIN
+   (SELECT DISTINCT objectId, restime, fieldvalue `status` FROM spark.sem3_task_0 
+   WHERE fieldname IN ('status')) a1  
+   ON a.objectid = a1.objectid AND a.restime = a1.restime
+    
+LEFT JOIN
+        (SELECT DISTINCT objectId, restime, fieldvalue AS `group`, 1 AS Назначение 
+         FROM spark.sem3_task_0 
+         WHERE fieldname IN ('gname2')) a2
+     ON a.objectid = a2.objectid AND a.restime = a2.restime) b1
+ORDER BY b1.ei, b1.StatusTime
